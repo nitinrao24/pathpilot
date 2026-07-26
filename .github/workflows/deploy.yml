@@ -1,0 +1,42 @@
+name: Deploy PathPilot
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Install & test backend
+        run: |
+          cd backend
+          pip install -r requirements.txt pytest httpx
+          pytest test_phase1.py test_phase2.py test_phase3.py -v --tb=short
+      - uses: actions/setup-node@v4
+        with: {node-version: "20"}
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+      - name: Copy dist to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "frontend/dist/*"
+          target: "/home/ubuntu/pathpilot/frontend/dist"
+          strip_components: 2
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/pathpilot
+            git pull origin main
+            docker compose up -d --build api
+            docker compose restart nginx
+            echo "Deployed ✓"
+            docker compose ps
